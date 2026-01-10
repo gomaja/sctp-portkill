@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Ensure a port number is provided
+if [ -z "$1" ]; then
+    echo "Usage: sctp-portkill <port_number>"
+    echo "Example: sudo sctp-portkill 2905"
+    exit 1
+fi
+
+PORT=$1
+
+# Logic:
+# -S: Display ONLY SCTP sockets
+# -n: Numeric ports
+# -p: Show processes (requires sudo to see PIDs)
+# awk: Matches the port at the end of the local address column ($4)
+PIDS=$(awk -v p=":$PORT" '$4 ~ p"$" {match($0, /pid=([0-9]+)/, arr); if(arr[1]) print arr[1]}' <(ss -Snp) | sort -u)
+
+if [ -z "$PIDS" ]; then
+    echo "No SCTP processes found on port $PORT."
+    exit 0
+fi
+
+for pid in $PIDS; do
+    echo "Terminating SCTP process PID $pid..."
+    kill -9 "$pid" 2>/dev/null
+done
