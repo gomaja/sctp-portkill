@@ -1,0 +1,73 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+jobs:
+  secret-detection:
+    name: secret detection
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: stable
+          cache: false
+      - name: gitleaks
+        id: gitleaks
+        shell: bash
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          set +e
+          "$(go env GOPATH)/bin/gitleaks" detect --source . --redact --exit-code 1 2>&1 | tee gitleaks.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          case "$status" in
+            0|1)
+              echo "status=$status" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              exit "$status"
+              ;;
+          esac
+      - name: Report scheduled secret-detection findings
+        if: github.event_name == 'schedule' && steps.gitleaks.outputs.status == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: 'Security scan: secret-detection findings'
+          BODY: |
+            The scheduled secret-detection scan found findings that need review.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            The issue intentionally contains no secret values or locations. Review the security alert before publishing any remediation detail.
+        run: |
+          set -euo pipefail
+          gh label create security --color d73a4a --description "Security follow-up" 2>/dev/null || true
+          existing="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --label security --body "$BODY"
+          fi
+      - name: Fail on secret-detection findings
+        if: steps.gitleaks.outputs.status == '1'
+        run: exit 1

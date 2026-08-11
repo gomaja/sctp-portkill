@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell:
+    name: shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: stable
+          cache: false
+      - name: actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.8 -color=false
+      - name: YAML syntax
+        run: git ls-files -z '*.yml' '*.yaml' | xargs -0 ruby -ryaml -e 'ARGV.each { |path| YAML.load_file(path) }'
+      - name: bash syntax
+        run: bash -n sctp-portkill
+      - name: ShellCheck
+        run: docker run --rm -v "$PWD:/mnt" koalaman/shellcheck:stable /mnt/sctp-portkill
+      - name: diff check
+        run: |
+          zero_sha="0000000000000000000000000000000000000000"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --check "${{ github.event.pull_request.base.sha }}...HEAD"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "$zero_sha" ]; then
+            git diff --check "${{ github.event.before }}...HEAD"
+          else
+            git diff-tree --check --root --no-commit-id -r HEAD
+          fi
+
+  package:
+    name: rpm spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: rpmspec parse
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+          rpmspec --parse sctp-portkill.spec >/dev/null
