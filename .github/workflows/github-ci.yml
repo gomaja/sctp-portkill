@@ -1,0 +1,21 @@
+# github-ci commit e3d9e0348103a2f8972b9e1766106f68ce636cbb
+name: github-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    permissions:
+      contents: read
+      security-events: write  # CodeQL publishes results evaluated by the local gate.
+    uses: gomaja/github-ci/.github/workflows/go.yml@b09a388e6cb31c20956866da0664bf6e56584123
+    with:
+      profile: repository-only
